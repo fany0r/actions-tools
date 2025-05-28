@@ -1,0 +1,126 @@
+name: Build Cloudflared
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+      
+    - name: Clone cloudflared
+      run: git clone https://github.com/cloudflare/cloudflared.git
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~\go\pkg\mod
+          .\cloudflared\go.sum
+        key: ${{ runner.os }}-go-${{ hashFiles('cloudflared/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+      
+    - name: Verify directory structure
+      run: |
+        if (!(Test-Path -Path "./cloudflared/cmd/cloudflared")) {
+          Write-Error "cloudflared directory structure is invalid"
+          Get-ChildItem -Recurse -Depth 2 ./cloudflared/cmd | Format-Table -AutoSize
+          exit 1
+        }
+        if (!(Test-Path -Path "./cloudflared-ico/resource")) {
+          Write-Error "resource not found"
+          Get-ChildItem ./cloudflared-ico
+          exit 1
+        }
+        if (!(Test-Path -Path "./cloudflared-ico/versioninfo.json")) {
+          Write-Error "versioninfo.json not found"
+          exit 1
+        }
+      
+    - name: Copy resources
+      run: |
+        try {
+          Copy-Item -Path "./cloudflared-ico/resource" -Destination "./cloudflared/cmd/cloudflared/" -Recurse -Force
+          Copy-Item -Path "./cloudflared-ico/versioninfo.json" -Destination "./cloudflared/cmd/cloudflared/" -Force
+          
+          if (!(Test-Path -Path "./cloudflared/cmd/cloudflared/resource")) {
+            throw "Resource copy failed"
+          }
+          if (!(Test-Path -Path "./cloudflared/cmd/cloudflared/versioninfo.json")) {
+            throw "versioninfo.json copy failed"
+          }
+        } catch {
+          Write-Error $_
+          Get-ChildItem -Recurse ./cloudflared/cmd/cloudflared
+          exit 1
+        }
+        
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.22'
+        
+    - name: Install goversioninfo
+      run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+      
+    - name: Prepare dependencies
+      working-directory: ./cloudflared
+      run: |
+        go mod tidy
+        go mod vendor
+        
+    - name: Update version info
+      working-directory: ./cloudflared/cmd/cloudflared
+      run: |
+        $VERSION = git describe --tags --always --match "[0-9][0-9][0-9][0-9].*.*"
+        if (-not $VERSION) { $VERSION = "unknown-$(git rev-parse --short HEAD)" }
+        $VERSION_NUM = $VERSION -split '-|_' | Select-Object -First 1
+        $VERSION_PARTS = $VERSION_NUM -split '\.'
+        
+        $major = if ($VERSION_PARTS.Count -ge 1) { $VERSION_PARTS[0] } else { 2024 }
+        $minor = if ($VERSION_PARTS.Count -ge 2) { $VERSION_PARTS[1] } else { 0 }
+        $patch = if ($VERSION_PARTS.Count -ge 3) { $VERSION_PARTS[2] } else { 0 }
+        $currentYear = (Get-Date).Year
+    
+        $versionInfo = Get-Content versioninfo.json -Raw | ConvertFrom-Json
+    
+        $versionInfo.FixedFileInfo.FileVersion.Major = [int]$major
+        $versionInfo.FixedFileInfo.FileVersion.Minor = [int]$minor
+        $versionInfo.FixedFileInfo.FileVersion.Patch = [int]$patch
+        $versionInfo.FixedFileInfo.FileVersion.Build = 0
+        $versionInfo.FixedFileInfo.ProductVersion = $versionInfo.FixedFileInfo.FileVersion
+    
+        $versionInfo.StringFileInfo.FileVersion = "$major.$minor.$patch"
+        $versionInfo.StringFileInfo.ProductVersion = "v$VERSION"
+        $versionInfo.StringFileInfo.LegalCopyright = "Cloudflare@$currentYear"
+    
+        $versionInfo | ConvertTo-Json -Depth 10 | Set-Content versioninfo.json
+    
+        # Write-Output "Updated versioninfo.json:"
+        # Get-Content versioninfo.json
+      
+    - name: Generate version info
+      working-directory: ./cloudflared/cmd/cloudflared
+      run: goversioninfo -64 versioninfo.json
+      
+    - name: Build
+      working-directory: ./cloudflared
+      run: |
+        $VERSION = git describe --tags --always --match "[0-9][0-9][0-9][0-9].*.*"
+        $DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd-HHmm UTC")
+        
+        $LDFLAGS = "-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$DATE'"
+        go build -mod=vendor -ldflags="$LDFLAGS" -trimpath -o cloudflared.exe -tags systray ./cmd/cloudflared
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Cloudflared
+        path: cloudflared/cloudflared.exe
