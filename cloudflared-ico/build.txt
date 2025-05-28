@@ -1,0 +1,23 @@
+git clone https://proxy.v2gh.com/https://github.com/cloudflare/cloudflared.git
+
+cp -r cloudflared-ico\resource cloudflared\cmd\cloudflared
+cp cloudflared-ico\versioninfo.json cloudflared\cmd\cloudflared
+
+cd cloudflared
+go mod tidy
+go mod vendor
+
+cd cmd\cloudflared
+goversioninfo -64 versioninfo.json
+cd ..\..\
+
+set VERSION=2024.11.1-dfbccd9
+set DATE=2024-12-07-1545_UTC
+set LDFLAGS=-s -w -X main.Version=%VERSION% -X main.BuildTime=%DATE%
+go build -mod=vendor -ldflags="%LDFLAGS%" -trimpath -o cloudflared.exe -tags systray .\cmd\cloudflared
+
+
+-----------------------------------------------------
+# error
+#go build -ldflags="-H windowsgui -s -w" -trimpath -o cloudflared.exe -tags systray .
+
