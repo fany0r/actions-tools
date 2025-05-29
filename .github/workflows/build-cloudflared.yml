@@ -16,24 +16,9 @@ jobs:
       
     - name: Clone cloudflared
       run: git clone https://github.com/cloudflare/cloudflared.git
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~\go\pkg\mod
-          .\cloudflared\go.sum
-        key: ${{ runner.os }}-go-${{ hashFiles('cloudflared/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
       
     - name: Verify directory structure
       run: |
-        if (!(Test-Path -Path "./cloudflared/cmd/cloudflared")) {
-          Write-Error "cloudflared directory structure is invalid"
-          Get-ChildItem -Recurse -Depth 2 ./cloudflared/cmd | Format-Table -AutoSize
-          exit 1
-        }
         if (!(Test-Path -Path "./cloudflared-ico/resource")) {
           Write-Error "resource not found"
           Get-ChildItem ./cloudflared-ico
@@ -67,6 +52,16 @@ jobs:
       with:
         go-version: '1.22'
         
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~\go\pkg\mod
+          .\cloudflared\go.sum
+        key: ${{ runner.os }}-go-${{ hashFiles('cloudflared/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+          
     - name: Install goversioninfo
       run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
       
