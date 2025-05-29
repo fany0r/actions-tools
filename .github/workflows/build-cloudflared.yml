@@ -78,9 +78,13 @@ jobs:
         
     - name: Update version info
       working-directory: ./cloudflared/cmd/cloudflared
+      id: version_step
       run: |
         $VERSION = git describe --tags --always --match "[0-9][0-9][0-9][0-9].*.*"
         if (-not $VERSION) { $VERSION = "unknown-$(git rev-parse --short HEAD)" }
+        
+        echo "version=$VERSION" >> $env:GITHUB_OUTPUT
+        
         $VERSION_NUM = $VERSION -split '-|_' | Select-Object -First 1
         $VERSION_PARTS = $VERSION_NUM -split '\.'
         
@@ -103,24 +107,21 @@ jobs:
     
         $versionInfo | ConvertTo-Json -Depth 10 | Set-Content versioninfo.json
     
-        # Write-Output "Updated versioninfo.json:"
-        # Get-Content versioninfo.json
-      
     - name: Generate version info
       working-directory: ./cloudflared/cmd/cloudflared
       run: goversioninfo -64 versioninfo.json
       
     - name: Build
       working-directory: ./cloudflared
+      env:
+        VERSION: ${{ steps.version_step.outputs.version }}
       run: |
-        $VERSION = git describe --tags --always --match "[0-9][0-9][0-9][0-9].*.*"
         $DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd-HHmm UTC")
-        
-        $LDFLAGS = "-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$DATE'"
+        $LDFLAGS = "-s -w -X 'main.Version=$env:VERSION' -X 'main.BuildTime=$DATE'"
         go build -mod=vendor -ldflags="$LDFLAGS" -trimpath -o cloudflared.exe -tags systray ./cmd/cloudflared
         
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Cloudflared
+        name: Cloudflared_${{ steps.version_step.outputs.version }}
         path: cloudflared/cloudflared.exe
